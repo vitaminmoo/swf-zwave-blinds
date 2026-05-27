@@ -35,7 +35,7 @@ the VCZ1 remote to the CSZ1 — is Z-Wave RF, not this bus.)
 | 2   | Brown  | 13 (GPIO) | **ENABLE / wake** | Master drives high to wake motor board; pulldown, idle low |
 | 3   | Red    | 10 (GPIO, alt UART0_RX) | **I²C SDA** | Bit-banged |
 | 4   | Orange | 15 (GPIO, alt UART0_TX) | **I²C SCL** | Bit-banged, master-driven; also carries the boot frame (below) |
-| 5   | —      | — (raw battery) | **VCC** | Raw battery passed straight through to motor board |
+| 5   | —      | — (raw battery) | **VCC** | Raw battery passed straight through to motor board. Supply is **8× AA in series** — ≈12 V nominal (alkaline), **unregulated**, so it sags as the cells drain (not a constant 12 V) |
 
 Each signal line: series resistor + shunt cap (RC filter) + 3-pin ESD clamp
 (steering diodes to VCC/GND), connected **directly** to the ZM5202 (no buffer,
@@ -359,7 +359,9 @@ until 7A = 0x01C0 (target) / 0x01C2 (closed limit) / 0x01C4 (open limit)
 You can bypass the Z-Wave side entirely:
 
 1. Wire an I²C master (Pi/Arduino) to **SDA = red/pin 3**, **SCL = orange/pin 4**,
-   **GND = pin 1**. Power the motor board from **VCC = pin 5** (raw battery).
+   **GND = pin 1**. Power the motor board from **VCC = pin 5** (raw battery — the
+   stock pack is **8× AA in series**, ≈12 V nominal and unregulated; supply
+   anything in that range).
 2. Raise **ENABLE (brown / pin 2)** high, wait ~30 ms.
 3. Talk SMBus to **0x0B** at ~15 kHz with **CRC-8 (poly 0x07) PEC**.
 4. Issue `0xD1`: `0xFFFFFFFF` (−1) = open, `0x00000001` (+1) = close, or a signed

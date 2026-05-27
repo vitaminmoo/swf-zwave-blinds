@@ -35,8 +35,9 @@ Part of the [Springs Window Fashions Z-Wave blind project](../README.md).
 | Firmware | 187.65:1.09; app self-reports `"Z-Wave 4.33"` |
 
 Other board features: a push-button, a two-color LED, and a battery power
-section. The 5-pin cable to the motor board carries ENABLE, I²C SDA/SCL, GND, and
-raw battery VCC (pinout in the [protocol doc](../docs/PROTOCOL.md)).
+section. The unit runs from **8× AA in series** (≈12 V nominal, unregulated). The
+5-pin cable to the motor board carries ENABLE, I²C SDA/SCL, GND, and that raw
+battery VCC (pinout in the [protocol doc](../docs/PROTOCOL.md)).
 
 ## Photos
 
