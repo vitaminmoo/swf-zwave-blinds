@@ -6,6 +6,8 @@ Window Fashions (Somfy) Z-Wave motorized blind system. Two devices:
 - **CSZ1** — *Cellular Shade Radio*, the control board inside the blind (Z-Wave
   brain + motor driver, on a ZM5202 module).
 - **VCZ1** — *Virtual Cord Control*, the two-button handheld remote (ZM5101).
+- **Motor-control board** — *SWF Killer Bee Motor Control Rev 2.3*, an
+  **ATmega168P** that drives the motor and answers the CSZ1 as an I²C slave.
 
 ## Documentation
 
@@ -14,6 +16,9 @@ Window Fashions (Somfy) Z-Wave motorized blind system. Two devices:
 - **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the control-board ↔ motor-board
   protocol (bit-banged I²C / SMBus, command map, move/position semantics),
   derived from logic-analyzer captures.
+- **[docs/MOTOR_BOARD.md](docs/MOTOR_BOARD.md)** — the motor board's ATmega168P:
+  firmware dump (USBtinyISP/avrdude), pin/peripheral map, motor drive, hall
+  position sensing, and the I²C slave side of the protocol.
 
 ## Layout
 
@@ -26,6 +31,10 @@ vcz1-remote/            VCZ1 (2-button remote)
   cav25256.bin            32 KiB SPI EEPROM dump
   nvm.hexpat              ImHex pattern for the dump
   tools/                  pyftdi scripts used to read the EEPROM
+motor_control_dump/     ATmega168P motor board (ISP dump)
+  flash.bin               16 KiB flash image
+  eeprom.bin              512 B EEPROM
+  *fuse.txt, lock.txt     fuse / lock byte reads
 shared/
   includes/               shared ImHex types (#include'd by both patterns)
 docs/                   HARDWARE.md, PROTOCOL.md
