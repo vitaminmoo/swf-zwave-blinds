@@ -43,14 +43,15 @@ raw battery VCC (pinout in the [protocol doc](../docs/PROTOCOL.md)).
 ![CSZ1 control board, top](images/top.jpg)
 
 Top side. The chip marked `SD3502A-CME3` (under the Sigma/SiLabs logo) is the
-Z-Wave SoC; the white wire is the antenna, and the 4-pin header at the top edge is
-broken out for the programming-FSM dump. Datamatrix + serial `5126731…` at left.
+Z-Wave SoC; the white wire is the antenna. The 4-pin header soldered at the top
+edge is **not original** — it's a tap added in place of the board's USB-micro jack
+(see below). Datamatrix + serial `5126731…` at left.
 
 ![CSZ1 control board, bottom](images/bottom.jpg)
 
 Bottom side. The white 5-pin connector (center) is the inter-board cable to the
 [Killer Bee](../killer-bee-motor-controller/README.md); the 4-pin header at the
-bottom edge is the same programming break-out.
+bottom edge is the same added USB-jack tap.
 
 ![Bench rig for dumping the CSZ1](images/firmware_dumping.jpg)
 
@@ -150,12 +151,18 @@ commands. The interface is identical on SPI1 and UART0 — we used **SPI1** beca
 it's already broken out to the M25PE20 and avoids the off-board RC filtering on
 the UART0 lines.
 
-> **Access aside:** the unit's USB-micro "power" port is **not USB** — it's 12 V on
-> VBUS with the SoC's **UART0** on the data pins (the same pins that become the
-> motor-board I²C). It's almost certainly the factory program/update port; the
-> `0x42 0x01 0xBD` boot announce (see the [protocol doc](../docs/PROTOCOL.md)) is a
-> bootloader hello with a ~3 s listen window. That path is write/update-only, so
-> the **dump uses the SPI1 FSM instead.**
+> **Access aside — the USB-micro jack is not USB.** This jack is the board's
+> **power input** (it normally connects to the battery pack / power source), but
+> its data pins are **not** USB: two of them are the **I²C SDA/SCL that run all the
+> way through the control board to the motor controller** (the same lines as the
+> internal 5-pin cable; see the [protocol doc](../docs/PROTOCOL.md)). So the jack
+> exposes both power and the motor I²C bus on the outside of the unit. The 4-pin
+> header in the photos above is a tap soldered in place of that jack to reach those
+> lines. On the wire these pins are the SoC's UART0 alt-function: at power-up they
+> carry the `0x42 0x01 0xBD` boot announce (a UART bootloader hello with a ~3 s
+> listen window) before the firmware switches them to bit-banged I²C — so the jack
+> is also the likely factory program/update port. That UART path is write/update
+> only, so the **internal-flash dump uses the SPI1 FSM instead** (below).
 
 **Wiring** — reuse the M25PE20 chip-clip harness, add one soldered wire:
 

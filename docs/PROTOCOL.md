@@ -368,6 +368,14 @@ You can bypass the Z-Wave side entirely:
 5. **Retry on PEC failure** — the bit-banged bus glitches occasionally, especially
    around power transitions. The real master tolerates this.
 
+Tapping at the connector above means opening the blind to the internal 5-pin
+cable. The same SDA/SCL (and power) are also exposed externally on the control
+board's **USB-micro jack**: it is the unit's power input, and two of its data pins
+are the I²C lines that run through the board to the motor controller — so you can
+reach this bus without disassembly. (See the
+[CSZ1 doc](../csz1-control-board/README.md) → *Access aside*; note these pins also
+emit the UART boot frame at power-up before switching to I²C.)
+
 ---
 
 ## Master-side firmware (SD3502 control board)
