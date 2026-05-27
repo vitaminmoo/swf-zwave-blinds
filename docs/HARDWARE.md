@@ -15,6 +15,10 @@ The system is two separate Z-Wave devices from the same vendor:
 Both are made by **Springs Window Fashions** (a Somfy partner; Z-Wave
 Manufacturer ID **`0x026E`**), built on Z-Wave 500-series modules.
 
+Inside the blind, the CSZ1 talks to a **third** board — an **ATmega168P** motor
+controller (*SWF Killer Bee Motor Control Rev 2.3*). Its firmware was dumped over
+ISP and analysed separately; see [`MOTOR_BOARD.md`](MOTOR_BOARD.md).
+
 > Status: chip identities, pinouts, dump procedure, and the manufacturer/serial
 > records are **confirmed** (cross-checked against Z-Wave Alliance certs). The
 > finer NVM layout (identity block, the `field2` value, the TLV record framing)
@@ -156,16 +160,74 @@ record lives inside one such record. The full TLV grammar isn't confirmed from t
 available dumps.
 
 **Not in these dumps:** the Z-Wave protocol version, application firmware, and
-device icons live in the **SD3502 internal firmware ROM**, not the external
-memory. That ROM is behind Sigma's proprietary serial programming interface (not
-SWD) and is likely lock-protected — not dumped.
+device icons live in the **SD3502 internal flash**, not the external memory. That
+flash is reached through Sigma's 500-series programming interface (not SWD) — and
+on this unit it turned out **not** to be lock-protected, so it *was* dumped. See
+*Reading the internal flash* below.
 
 ---
+
+## Reading the internal flash (SD3502 programming FSM)
+
+The SD3502's on-chip memory is read through the **500-series programming
+interface** (SPI/UART/USB; *not* SWD), documented in Silicon Labs
+[INS11681][ins11681]. Entry: hold the module's `RESET_N` (pin 2) low ≥5.1 ms,
+clock the *Enable Interface* string `AC 53 AA 55`, then issue 4-byte commands.
+The interface is identical on SPI1 and UART0 — we used **SPI1** because it's
+already broken out to the M25PE20 and avoids the off-board RC filtering on the
+UART0 lines.
+
+> **Access aside:** the unit's USB-micro "power" port is **not USB** — it's 12 V
+> on VBUS with the SoC's **UART0** on the data pins (the same pins that become the
+> motor-board I²C). It's almost certainly the factory program/update port; the
+> `0x42 0x01 0xBD` boot announce (see `PROTOCOL.md`) is a bootloader hello with a
+> ~3 s listen window. That path is write/update-only, so the **dump uses the
+> SPI1 FSM instead.**
+
+**Wiring** — reuse the M25PE20 chip-clip harness, add one soldered wire:
+
+| Signal | Module pin | Clip pin | FT232H |
+|:--|:--:|:--:|:--:|
+| SCK | 8 | 6 | D0 |
+| MOSI | 9 | 5 | D1 |
+| MISO | 7 | 2 | D2 |
+| GND | — | 4 | GND |
+| VCC (back-power, 3.3 V) | — | 8 | 3V3 |
+| `RESET_N` | 2 | — *(solder)* | D4 |
+
+In programming mode the SoC pulls the flash's CS# high (deselected), so the
+shared bus is clean. The FT232H **I²C switch must be OFF** (it shorts D1/D2).
+
+**Result — readback is OPEN on this unit.** Signature `7F 7F 7F 7F 1F 04 01`
+(ZW0500, rev 01); lock bytes `FF FF FF FF FF FF FF FF FF` → **RBAP bit 0 = 1**
+(no read-back protection) and EP0–EP7 = `FF` (no erase protection). Sector 0
+begins with a valid 8051 vector table (`02 03 37` = `LJMP 0x0337` at reset).
+
+Dumped with [`tools/sd3502_fsm_probe.py`](../csz1-control-board/tools/sd3502_fsm_probe.py)
+`--dump`: all 64 × 2 KB sectors plus the NVR (`0x09–0xFF`). The tool is strictly
+read-only — it never issues erase/write/lock commands. The MTP data area
+(register-addressed) and SRAM (volatile) are not FSM-readable and are not dumped.
+
+**Integrity:** read twice with identical SHA-256, and the first 16 bytes match
+the expected 8051 vector table. The on-chip CRC-32 slot (top 4 bytes,
+`0x1FFFC–0x1FFFF`) is **unprogrammed** (`FF FF FF FF`) — this application doesn't
+use that feature (OTA validates via the external-NVM CRC instead), so a CRC
+"mismatch" from the tool is expected, not a read error.
+
+**`sd3502_internal.bin`** (128 KiB, sha256 `9329071c…d2d738f`) is ~55 % content,
+~45 % `0xFF` erased. Notable strings: a serial/ID `"5120199"` (`0x181d`), the
+Z-Wave Association Group-1 name `"Lifeline"` with its association table
+(`0x2268`), and an app version string **`"Z-Wave 4.33"`** (`0x24e5`) — the
+firmware's self-reported version, separate from the certified protocol version
+`6.61.00`.
 
 ## Files
 
 | File | What |
 |:--|:--|
+| `csz1-control-board/sd3502_internal.bin` | **CSZ1 SD3502 internal flash dump (128 KiB)** |
+| `csz1-control-board/sd3502_nvr.bin` | CSZ1 SD3502 NVR dump (247 B, base addr `0x09`) |
+| `csz1-control-board/tools/sd3502_fsm_probe.py` | 500-series programming-FSM reader/dumper (pyftdi) |
 | `csz1-control-board/m25pe20.bin` | CSZ1 control-board flash dump (256 KiB) |
 | `csz1-control-board/nvm.hexpat` | ImHex pattern for the CSZ1 dump |
 | `csz1-control-board/captures/` | Logic-analyzer captures (see `PROTOCOL.md`) |
@@ -207,8 +269,12 @@ SWD) and is likely lock-protected — not dumped.
 - [ ] Confirm the `0x0B`-prefixed TLV record framing across the whole config block.
 - [ ] Determine whether network security keys are stored in the external memory or
       only in the SoC.
-- [ ] (Out of scope / likely locked) SD3502 internal firmware ROM via the Sigma
-      proprietary programming interface.
+- [x] ~~(Out of scope / likely locked) SD3502 internal firmware ROM via the Sigma
+      proprietary programming interface.~~ **Done** — readback was *not* locked;
+      128 KB flash + NVR dumped over the SPI1 programming FSM (see *Reading the
+      internal flash*); version string `"Z-Wave 4.33"` and serial `"5120199"`
+      recovered. Follow-up: disassemble `sd3502_internal.bin` (8051) — start with
+      the `0x1800` LJMP jump table the reset/interrupt vectors point into.
 
 ---
 
@@ -223,6 +289,8 @@ SWD) and is likely lock-protected — not dumped.
   equivalent to the Micron M25PE20 we read)
 - [CAV25256][ds-cav25256] — SPI EEPROM in the VCZ1 remote
 - [ZM5202][ds-zm5202] — Z-Wave 500-series module (CSZ1)
+- [INS11681][ins11681] — 500-series chip programming mode (FSM command set,
+  lock bits, RBAP, on-chip CRC-32) — the procedure used to dump the SD3502
 
 **Product documentation**
 - [SWF Cellular/Pleated Shade Installation Instructions][install] — pairing,
@@ -233,4 +301,5 @@ SWD) and is likely lock-protected — not dumped.
 [ds-pe20]: https://www.mouser.com/datasheet/2/698/REN_DS_AT25PE20_139D_022022_unsecure_DST_20220220_-3076023.pdf
 [ds-cav25256]: https://www.onsemi.com/download/data-sheet/pdf/cav25256-d.pdf
 [ds-zm5202]: https://www.silabs.com/documents/public/data-sheets/DSH12435-15.pdf
+[ins11681]: https://www.silabs.com/documents/public/user-guides/INS11681-Instruction-500-Series-Z-Wave-Chip-Programming-Mode.pdf
 [install]: https://media.blinds.com/pdfs/SWF_CellPleated_InstallationInstructions.pdf

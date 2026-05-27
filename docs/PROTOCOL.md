@@ -7,7 +7,10 @@ Reverse-engineering notes for a Z-Wave smart blind. Two boards:
   section, and a **25PE20VP** (Micron/ST M25PE20, 2 Mbit) SPI flash on the module's
   SPI1 bus.
 - **Motor controller board** — drives the motor, reads the magnet + two hall
-  sensors for position. Connected to the control board by a 5-pin cable.
+  sensors for position. Connected to the control board by a 5-pin cable. Built on
+  an **ATmega168P**; its dumped firmware confirms the slave side of this protocol
+  (slave address, TWI state machine, register handling) — see
+  [`MOTOR_BOARD.md`](MOTOR_BOARD.md).
 
 The control board (ZM5202, **I²C master**) commands the motor board (**I²C slave
 @ 0x0B**) over a **bit-banged I²C bus using SMBus framing**.
@@ -54,15 +57,88 @@ SCL pin → idle → ENABLE high again → ~70 ms later I²C begins.
 ## I²C / SMBus transport
 
 - **Bus:** bit-banged I²C, ~15 kHz (SCL ≈ 17.5 µs low / 50 µs high, jittery).
-- **Master:** ZM5202.  **Slave:** **0x0B** (7-bit).
-- **Framing:** SMBus.
-  - Block read: `[count] [data…] [PEC]`
-  - Read word: `[lo] [hi] [PEC]`
-  - Block write: `[cmd] [count] [data…] [PEC]`
-- **PEC:** **CRC-8, polynomial 0x07** (SMBus PEC), computed over address +
-  command + data. Validates on clean transactions.
-- **Endianness:** payloads are **big-endian (MSB first)**, despite SMBus's nominal
-  little-endian word order. Parse all multi-byte values MSB-first.
+- **Master:** ZM5202.  **Slave address:** **0x0B** (7-bit) → write byte `0x16`,
+  read byte `0x17`. (Firmware: `TWAR = 0x16`, i.e. address `0x0B` in bits 7:1.)
+- **Bit rate tolerance:** the slave is a hardware TWI peripheral on an 8 MHz
+  ATmega168P; it clock-stretches and is insensitive to the master's exact rate.
+- **Endianness:** multi-byte payloads are **big-endian (MSB first)**, despite
+  SMBus's nominal little-endian word order. Parse all multi-byte values MSB-first.
+
+### Notation
+
+`S` = START, `Sr` = repeated START, `P` = STOP, `Wr`=`0x16`, `Rd`=`0x17`.
+`[x]` = one byte. **Bold** = driven by the slave; the rest by the master.
+
+### Frame formats (byte-by-byte)
+
+These are the SMBus protocols the master actually uses, with the exact byte
+sequence on the wire. `N` is the block byte count.
+
+**Block read** (used by `0x9B`, `0xA1`, `0xA3`, `0xA4`):
+```
+S Wr [cmd] Sr Rd  **[N] [d0] [d1] … [d(N-1)] [PEC]**  P
+                    ^count ^big-endian payload (d0 = MSB)   ^slave-computed
+```
+
+**Read word** (used by `0x7A`, `0x8B`) — SMBus Read Word, **no count byte**:
+```
+S Wr [cmd] Sr Rd  **[lo] [hi] [PEC]**  P
+```
+Payload is big-endian on the wire for this device: the first data byte is the
+**high** byte of the 16-bit value (parse MSB-first regardless of SMBus's
+little-endian convention).
+
+**Block write** (used by `0xD1`):
+```
+S Wr [cmd] [N] [d0] [d1] … [d(N-1)] [PEC]  P
+            ^count ^big-endian payload (d0 = MSB)
+```
+
+### PEC — CRC-8/SMBus (firmware-confirmed)
+
+- **Algorithm:** CRC-8, **polynomial `0x07`**, **init `0x00`**, no reflection,
+  no final XOR — the standard SMBus PEC.
+- **Coverage:** every byte of the transaction *including the address bytes and
+  the R/W bit*, in transmission order. Concretely:
+  - block/word **read**: `Wr, cmd, Rd, <count if block>, d0…d(N-1)`
+  - block **write**: `Wr, cmd, count, d0…d(N-1)`
+- **Slave implementation (confirmed in the ATmega168P firmware):** table-driven.
+  The TWI ISR folds each received byte into a running PEC,
+  `pec = crc8_table[pec ^ byte]`, using a 256-byte CRC-8/SMBus table in flash and
+  the accumulator `twi_pec` (= `twi_buf[4]`). On a read the same accumulator is
+  clocked out as the trailing PEC byte. See `MOTOR_BOARD.md`
+  (`crc8_smbus_table` @ `code:0034`, `crc8_pec_lookup` @ `code:0CCC`).
+- **Reference table:** `00 07 0E 09 1C 1B 12 15 …` (first 8 entries).
+- **Behavior:** the slave NAKs / flags `twi_parse_status` on a bad PEC; the
+  bit-banged master occasionally glitches a transaction, so **retry on PEC error**
+  (the real master does).
+
+### Worked examples
+
+The PEC definition above is **verified against the captures**: re-deriving CRC-8
+(poly 0x07, init 0) over `[Wr, cmd, (Rd), count?, data…]` reproduces **every** PEC
+byte in `up_down.csv` (26/26 frames, including block reads, read words, and the
+`0xD1` block write). PEC bytes below are computed the same way.
+
+Read live position `0xA4` (block read of an `i32`, value `+576` = closed):
+```
+S 16 A4 Sr 17  **04 00 00 02 40 20**  P
+            └N┘ └─ 0x00000240 = 576, MSB first ─┘ └PEC
+PEC = crc8( 16 A4 17 04 00 00 02 40 ) = 0x20
+```
+
+Read status word `0x7A` (read word, value `0x01C0` = stopped at target):
+```
+S 16 7A Sr 17  **01 C0 38**  P
+PEC = crc8( 16 7A 17 01 C0 ) = 0x38
+```
+
+Move command `0xD1` (block write of an `i32`; `-1` = open to bottom limit):
+```
+S 16 D1 04 FF FF FF FF 63  P
+        └N┘ └─ 0xFFFFFFFF = -1, MSB first ─┘ └PEC
+PEC = crc8( 16 D1 04 FF FF FF FF ) = 0x63
+```
 
 ---
 
@@ -79,6 +155,12 @@ SCL pin → idle → ENABLE high again → ~70 ms later I²C begins.
 | 0xD1 | W (Process Call?) | block(4) i32 | `+1`, `−1`, signed deltas | **Move command** (see below) |
 
 Notes:
+- **Firmware-confirmed:** the motor board dispatches reads and writes *directly*
+  on these register codes (no internal remap) — see `MOTOR_BOARD.md`
+  (`twi_read_response_dispatch` / `twi_write_cmd_dispatch`). The read dispatcher
+  also implements `0x96/0x98/0x99/0x9A/0x9D/0x9E/0x9F/0xB0` and the write
+  dispatcher `0x00–0x09/0x89/0x8C/0x8D/0xC0/0xD0/0xD2`, none of which appear in
+  the captures yet.
 - `0xA4` **persists across power cycles** — boots read the last parked position
   (e.g. −6). The board does **not** re-home on power-up.
 - One `0xD1` write decoded as SMBus "Process call" — believed to be a bit-bang
@@ -214,8 +296,10 @@ A logic-analyzer MCP server is configured for loading/analyzing these `.sal` fil
 
 ## Hardware reference
 
-- **MCU:** SD3502 (Z-Wave 500-series, 8051). Firmware in internal flash; debug via
-  Sigma proprietary serial programming interface (not SWD), likely lock-protected.
+- **MCU:** SD3502 (Z-Wave 500-series, 8051). Firmware in internal flash, read via
+  the Sigma/SiLabs 500-series programming FSM (not SWD; INS11681). **Not**
+  lock-protected on this unit — readback is open and the 128 KB image was dumped;
+  see [`HARDWARE.md`](HARDWARE.md).
 - **Module:** ZM5202 (12.5×13.6 mm), pins 7/8/9 = SPI1 MISO/SCK/MOSI to the 25PE20 flash.
 - **External flash:** 25PE20VP, 256 KB SPI — OTA image staging / NVM. Dumped and
   analyzed separately; see [`HARDWARE.md`](HARDWARE.md).
