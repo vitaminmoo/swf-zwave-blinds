@@ -163,6 +163,12 @@ the UART0 lines.
 > listen window) before the firmware switches them to bit-banged I²C — so the jack
 > is also the likely factory program/update port. That UART path is write/update
 > only, so the **internal-flash dump uses the SPI1 FSM instead** (below).
+>
+> The jack does **not** carry the motor board's **ENABLE** line, though — so this
+> external tap can reach the motor I²C bus but **can't wake the motor board to
+> drive it** (it stays asleep and won't ACK). Possibly a debug/passthrough; purpose
+> unconfirmed. Commanding the motor still needs ENABLE from the internal 5-pin
+> cable (see the [protocol doc](../docs/PROTOCOL.md)).
 
 **Wiring** — reuse the M25PE20 chip-clip harness, add one soldered wire:
 

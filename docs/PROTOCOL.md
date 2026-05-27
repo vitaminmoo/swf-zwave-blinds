@@ -368,13 +368,16 @@ You can bypass the Z-Wave side entirely:
 5. **Retry on PEC failure** — the bit-banged bus glitches occasionally, especially
    around power transitions. The real master tolerates this.
 
-Tapping at the connector above means opening the blind to the internal 5-pin
-cable. The same SDA/SCL (and power) are also exposed externally on the control
-board's **USB-micro jack**: it is the unit's power input, and two of its data pins
-are the I²C lines that run through the board to the motor controller — so you can
-reach this bus without disassembly. (See the
-[CSZ1 doc](../csz1-control-board/README.md) → *Access aside*; note these pins also
-emit the UART boot frame at power-up before switching to I²C.)
+The recipe above taps the internal 5-pin cable (requires opening the blind). The
+control board's external **USB-micro jack** also exposes the **I²C SDA/SCL and
+power** — its data pins run through the board to the motor controller — but **not
+the ENABLE line (brown / pin 2)**. Without ENABLE the motor board never wakes, so
+it won't ACK or move: the external jack lets you reach the bus electrically but
+**not drive the motor**. (Possibly an intentional debug/passthrough; purpose
+unconfirmed.) To actually command the motor you still need ENABLE from the
+internal connector. See the [CSZ1 doc](../csz1-control-board/README.md) →
+*Access aside*; note these pins also emit the UART boot frame at power-up before
+switching to I²C.
 
 ---
 
