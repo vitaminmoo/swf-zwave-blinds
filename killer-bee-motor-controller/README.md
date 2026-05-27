@@ -1,11 +1,15 @@
-# Motor-Control Board — Firmware & Hardware
+# Killer Bee — SWF Motor Control board (ATmega168P)
 
-Reverse-engineering notes for the **third** board in the blind: the motor
-controller that the Z-Wave control board (CSZ1) commands over I²C. Companion to
-[`PROTOCOL.md`](PROTOCOL.md) (the inter-board wire protocol, captured from the
-master side) and [`HARDWARE.md`](HARDWARE.md) (the Z-Wave silicon). This document
-covers the motor board's MCU, how its firmware was dumped, the pin/peripheral
-map, and the firmware-side view of the I²C protocol.
+The **Killer Bee** is the motor-control board inside the blind. The
+[CSZ1 controller](../csz1-control-board/README.md) commands it over I²C; it drives
+the DC motor and reports position back. This document covers its purpose, MCU, how
+its firmware was dumped, the pin/peripheral map, and the firmware-side view of the
+I²C protocol. The inter-board wire protocol (captured from the master side) is in
+the [protocol doc](../docs/PROTOCOL.md).
+
+Part of the [Springs Window Fashions Z-Wave blind project](../README.md).
+
+## Overview
 
 - **Board:** `SWF Killer Bee Motor Control Rev 2.3`
 - **MCU:** Microchip/Atmel **ATmega168P** (16 KB flash, 1 KB SRAM, 512 B EEPROM)
@@ -15,10 +19,29 @@ map, and the firmware-side view of the I²C protocol.
 
 > Status: the **firmware was dumped** (chip was unlocked) and analysed in Ghidra.
 > The peripheral/pin map and I²C slave framing below are read directly from the
-> firmware and cross-checked against the master-side captures in `PROTOCOL.md`
+> firmware and cross-checked against the master-side captures in `../docs/PROTOCOL.md`
 > (slave address **0x0B** matches). Items marked *(hypothesis)* — chiefly which
 > H-bridge leg is "open" vs "close" and the exact connector→pin mapping — are
 > inferred and not yet bench-confirmed.
+
+## Photos
+
+![Killer Bee board, top](images/top.jpg)
+
+Top side: the ATmega168P with the motor H-bridge and its bulk electrolytic cap,
+the power leads at the top edge, and the white motor/sensor connector at the
+bottom.
+
+![Killer Bee board, bottom](images/bottom.jpg)
+
+Bottom side, with the board marking *SWF / KILLER BEE / KB MOTOR CONTROL / REV
+2.3 / LSDI*. The `P4` pad row is the **6-pad AVR ISP header** (`+ / RES / SCK /
+MISO / MOSI / -`) used for the dump below; `TP1…TP8` are test points.
+
+![Dumping the firmware over ISP](images/firmware_dumping.jpg)
+
+Reading flash + EEPROM with a **USBtinyISP** (right) over a ribbon to the 6-pad
+ISP header — the `avrdude` command below.
 
 ---
 
@@ -110,7 +133,7 @@ legs are **Timer0 fast-PWM** outputs at ~31 kHz (`TCCR0B` clk ÷1).
   and snapshot the hall lines.
 
 Which leg maps to *open* vs *close* is not yet bench-confirmed *(hypothesis)*; the
-master-side sign convention (`PROTOCOL.md`: negative = open, positive = close) is
+master-side sign convention (`../docs/PROTOCOL.md`: negative = open, positive = close) is
 the reference once correlated.
 
 The `TIMER0_COMPA`/`COMPB` ISRs simply reload `OCR0A`/`OCR0B` from a stored value
@@ -131,7 +154,7 @@ The `TIMER0_COMPA`/`COMPB` ISRs simply reload `OCR0A`/`OCR0B` from a stored valu
 
 ## I²C — slave side (firmware view)
 
-This confirms and complements `PROTOCOL.md` (which was captured from the master).
+This confirms and complements `../docs/PROTOCOL.md` (which was captured from the master).
 
 - **Hardware TWI slave**, **not** bit-banged (the *master* bit-bangs; this side
   uses the '168P TWI peripheral).
@@ -192,7 +215,7 @@ This confirms and complements `PROTOCOL.md` (which was captured from the master)
     trailing PEC byte (`0xC0`/`0xC8` states) — so the same routine produces the
     outgoing PEC.
   - **End-to-end verified:** re-deriving this CRC over the captured wire bytes
-    reproduces every PEC in `up_down.csv` (26/26 frames) — see `PROTOCOL.md`.
+    reproduces every PEC in `up_down.csv` (26/26 frames) — see `../docs/PROTOCOL.md`.
   - Frame-level validation also parses a descriptor and checks the byte **count**
     (`frame[6]`) plus the received **PEC at `frame[4]`** (`twi_get_pec_byte_buf4`),
     setting `twi_parse_status` to a nonzero error code (`4` = length, `6` = PEC) on
@@ -202,7 +225,7 @@ This confirms and complements `PROTOCOL.md` (which was captured from the master)
 
 The register/command byte (`frame[5]`) is dispatched by two functions with **no
 remap** — the wire code is the internal opcode. The **complete opcode map (read +
-write, all ~30 codes, payload shapes and semantics) now lives in `PROTOCOL.md`**;
+write, all ~30 codes, payload shapes and semantics) now lives in `../docs/PROTOCOL.md`**;
 this section records the firmware-side handlers and SRAM/EEPROM sources.
 
 - **`twi_read_response_dispatch`** (`code:00f2`, TWI `0xA8` SLA+R) — switch on
@@ -311,7 +334,7 @@ reference. Observed/used field offsets:
 | `0x32–0x35` | hall quadrature history / snapshot |
 
 `load_config_from_nvm` populates offsets `0x00..0x3F` at boot (from EEPROM/NVM —
-this is where the persistent parked position comes from, matching `PROTOCOL.md`'s
+this is where the persistent parked position comes from, matching `../docs/PROTOCOL.md`'s
 note that `0xA4` survives power cycles and the board does **not** re-home).
 
 ---
@@ -373,9 +396,10 @@ re-home): the values live in EEPROM behind a valid-bit + signature, not in flash
 
 | File | What |
 |:--|:--|
-| `motor_control_dump/flash.bin` | ATmega168P flash image (16 KB) |
-| `motor_control_dump/eeprom.bin` | EEPROM (512 B) |
-| `motor_control_dump/{l,h,e}fuse.txt`, `lock.txt` | Fuse / lock byte reads |
+| `flash.bin` | ATmega168P flash image (16 KB) |
+| `eeprom.bin` | EEPROM (512 B) |
+| `{l,h,e}fuse.txt`, `lock.txt` | Fuse / lock byte reads |
+| `images/` | board / device photos |
 
 ---
 
@@ -384,7 +408,7 @@ re-home): the values live in EEPROM behind a valid-bit + signature, not in flash
 - [x] ~~Trace `twi_reg_addr` → internal opcode mapping~~ — **resolved**: the wire
       register code *is* the internal opcode (no remap). Both
       `twi_read_response_dispatch` and `twi_write_cmd_dispatch` switch directly on
-      it; verified against `PROTOCOL.md` (0x7A/0x8B/0x9B/0xA1/0xA3/0xA4/0xD1).
+      it; verified against `../docs/PROTOCOL.md` (0x7A/0x8B/0x9B/0xA1/0xA3/0xA4/0xD1).
 - [x] ~~Pin the exact on-chip **CRC-8 (poly 0x07)** routine~~ — **resolved**:
       table-driven CRC-8/SMBus. Table `crc8_smbus_table` @ `code:0034` (flash
       `0x68`), per-byte fetch `crc8_pec_lookup` @ `code:0CCC`, accumulator
@@ -418,7 +442,7 @@ re-home): the values live in EEPROM behind a valid-bit + signature, not in flash
       ref, /64, polled in `main`, 32-sample sum) is a separate path; whether `0x0319`
       ultimately carries a processed ADC reading is unconfirmed.
 - [x] ~~Decode the full read/write opcode set~~ — **resolved**: all ~30 dispatcher
-      opcodes decoded and documented in `PROTOCOL.md`; handlers named in Ghidra.
+      opcodes decoded and documented in `../docs/PROTOCOL.md`; handlers named in Ghidra.
 - [x] ~~Identify the large unnamed superloop/motor functions~~ — **resolved**:
       `motor_run_step` (`code:11d8`, servo step), `twi_xfer_result_dispatch`
       (`code:12ff`), `motor_finalize_position_to_nvm` (`code:13db`), and the I²C

@@ -1,24 +1,25 @@
-# Z-Wave Blind Controller — Inter-Board Protocol
+# CSZ1 ↔ Killer Bee — Inter-Board Protocol
 
-Reverse-engineering notes for a Z-Wave smart blind. Two boards:
+The cross-component wire protocol inside the
+[Springs Window Fashions Z-Wave blind](../README.md). The two boards on the bus:
 
-- **Control board** — Z-Wave brain. ZM5202 module (Sigma Designs / Silicon Labs
-  **SD3502**, Z-Wave 500-series, 8051 core), button, two-color LED, battery power
-  section, and a **25PE20VP** (Micron/ST M25PE20, 2 Mbit) SPI flash on the module's
-  SPI1 bus.
-- **Motor controller board** — drives the motor, reads the magnet + two hall
-  sensors for position. Connected to the control board by a 5-pin cable. Built on
-  an **ATmega168P**; its dumped firmware confirms the slave side of this protocol
-  (slave address, TWI state machine, register handling) — see
-  [`MOTOR_BOARD.md`](MOTOR_BOARD.md).
+- **[CSZ1 controller](../csz1-control-board/README.md)** — the Z-Wave brain. ZM5202
+  module (Sigma Designs / Silicon Labs **SD3502**, Z-Wave 500-series, 8051 core).
+  It is the **I²C master** on this bus.
+- **[Killer Bee motor board](../killer-bee-motor-controller/README.md)** — drives
+  the motor, reads the magnet + two hall sensors for position. Connected to the
+  CSZ1 by a 5-pin cable. Built on an **ATmega168P**; its dumped firmware confirms
+  the slave side of this protocol (slave address, TWI state machine, register
+  handling).
 
-The control board (ZM5202, **I²C master**) commands the motor board (**I²C slave
-@ 0x0B**) over a **bit-banged I²C bus using SMBus framing**.
+The CSZ1 (ZM5202, **I²C master**) commands the Killer Bee (**I²C slave @ 0x0B**)
+over a **bit-banged I²C bus using SMBus framing**. (The other link in the system —
+the VCZ1 remote to the CSZ1 — is Z-Wave RF, not this bus.)
 
 > Status: the transport layer (pinout, I²C, SMBus framing, PEC, direction,
 > position) is confirmed from captures **and from both firmwares**. The full
 > command/register map is decoded from the motor-board (slave) firmware
-> (`MOTOR_BOARD.md`); the **master side is now also decoded from the SD3502 control
+> (`../killer-bee-motor-controller/README.md`); the **master side is now also decoded from the SD3502 control
 > firmware** (see *Master-side firmware* below) — the bit-bang I²C driver, the
 > address/PEC, and the read/write/move command builders all match. Codes marked ⬤
 > were also exercised in captures. Field *meanings* marked "(hypothesis)" still need
@@ -119,7 +120,7 @@ S Wr [cmd] [N] [d0] [d1] … [d(N-1)] [PEC]  P
   The TWI ISR folds each received byte into a running PEC,
   `pec = crc8_table[pec ^ byte]`, using a 256-byte CRC-8/SMBus table in flash and
   the accumulator `twi_pec` (= `twi_buf[4]`). On a read the same accumulator is
-  clocked out as the trailing PEC byte. See `MOTOR_BOARD.md`
+  clocked out as the trailing PEC byte. See `../killer-bee-motor-controller/README.md`
   (`crc8_smbus_table` @ `code:0034`, `crc8_pec_lookup` @ `code:0CCC`).
 - **Master implementation (confirmed in the SD3502 firmware):** *bit-serial*, not
   table-driven. `smbus_pec_crc8_update` folds each byte with
@@ -201,7 +202,7 @@ bytes. Codes marked ⬤ were also seen in captures.
 | `0xB0` | | word (2B) | `compute_response_b0` (32-bit math result) |
 
 > `0xA1/0xA2/0xA3` are the three values from the EEPROM `int32[4]` calibration
-> block at `0x70` (see `MOTOR_BOARD.md`); `0xA4` is the live RAM position. So
+> block at `0x70` (see `../killer-bee-motor-controller/README.md`); `0xA4` is the live RAM position. So
 > `0xA3` (full travel = 576) is a stored calibration constant, while `0xA4` moves.
 
 #### Full write map (reg → action), from firmware
@@ -254,7 +255,7 @@ Per-byte transfers are handled by `twi_bootloader_byte_handler` (`1c5e`); a 16-b
 inactivity counter disarms the session on timeout. **Full download/program frame
 layout (addressing, block size, checksum placement) is not yet mapped** — this is a
 candidate for the next capture/trace session. Security note: the path into program
-flash is gated only by the `0x90xx` magic word over I²C. See `MOTOR_BOARD.md` →
+flash is gated only by the `0x90xx` magic word over I²C. See `../killer-bee-motor-controller/README.md` →
 *I²C firmware-update bootloader* for the firmware-side detail.
 
 Notes:
@@ -456,7 +457,7 @@ A logic-analyzer MCP server is configured for loading/analyzing these `.sal` fil
 - **MCU:** SD3502 (Z-Wave 500-series, 8051). Firmware in internal flash, read via
   the Sigma/SiLabs 500-series programming FSM (not SWD; INS11681). **Not**
   lock-protected on this unit — readback is open and the 128 KB image was dumped;
-  see [`HARDWARE.md`](HARDWARE.md).
+  see [the CSZ1 doc](../csz1-control-board/README.md).
 - **Module:** ZM5202 (12.5×13.6 mm), pins 7/8/9 = SPI1 MISO/SCK/MOSI to the 25PE20 flash.
 - **External flash:** 25PE20VP, 256 KB SPI — OTA image staging / NVM. Dumped and
-  analyzed separately; see [`HARDWARE.md`](HARDWARE.md).
+  analyzed separately; see [the CSZ1 doc](../csz1-control-board/README.md).
