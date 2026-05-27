@@ -221,6 +221,45 @@ Z-Wave Association Group-1 name `"Lifeline"` with its association table
 firmware's self-reported version, separate from the certified protocol version
 `6.61.00`.
 
+## Disassembling the firmware (Ghidra, banked 8051)
+
+The SD3502 core is an 8051, so the dump loads as **`8051:BE:16:default`** (Raw
+Binary). But the 8051 code space is only 16-bit (**64 KiB**) and the image is
+**128 KiB** — a flat import silently truncates to the first 64 KiB and finds no
+functions. The firmware is a **Keil L51 *banked*** build: a 32 KiB **common**
+region present in every bank, plus a 32 KiB **window** at `0x8000-0xFFFF` that is
+paged across three banks.
+
+| CPU window | File offset | Ghidra block | Bank field (SFR `0xFF[5:4]`) |
+|:--|:--|:--|:--|
+| `0x0000-0x7FFF` common (all banks) | `0x00000-0x07FFF` | `CODE` | — |
+| `0x8000-0xFFFF` bank 0 | `0x08000-0x0FFFF` | `CODE` (base) | 1 |
+| `0x8000-0xFFFF` bank 1 | `0x10000-0x17FFF` | `BANK1` overlay | 2 |
+| `0x8000-0xFFFF` bank 2 | `0x18000-0x1FFFF` | `BANK2` overlay | 3 |
+
+**Bank-select register: SFR `0xFF`, bits [5:4]** (labelled `FLASH_BANK_SEL`).
+Boot (`0x184e`) sets it to bank field 0 via `MOV 0xFF,#3`. Banked calls go through
+the L51 runtime: a per-function **thunk** `MOV DPTR,#target ; AJMP <dispatcher>`,
+where the dispatcher (`0x1916`/`0x192c`/`0x1942` for fields 1/2/3) pushes a return
+frame, switches the bank with `MOV A,0xFF ; ANL A,#0xCF ; ORL A,#bank<<4 ; MOV
+0xFF,A`, then `RET`s into the target. The reset/IRQ vectors at `0x0000-0x0073`
+trampoline into a jump table at `0x1800`.
+
+Run **[`tools/ghidra_load_sd3502_banked.java`](../csz1-control-board/tools/ghidra_load_sd3502_banked.java)**
+from the Ghidra Script Manager after import. It (idempotently) creates the two
+bank overlays from the on-disk file, labels `FLASH_BANK_SEL`, seeds disassembly at
+the reset/interrupt vectors, then scans the common region for the dispatchers and
+the 97 banked-call thunks and rewires each thunk to a Ghidra **thunk-function**
+pointing at the real banked target (`bankN_xxxx`). The result: callers in the
+common region decompile straight through into the correct bank, and in-bank calls
+resolve within each overlay.
+
+> Caveat: cross-bank calls resolve, but the disassembler can't statically follow
+> the `MOV 0xFF` bank switch, so a banked function's data references and any
+> computed (`@A+DPTR`) jumps still resolve against whatever bank is *currently*
+> mapped in the base `0x8000` window (bank 0). Switch the listing to the `BANK1`/
+> `BANK2` overlay to read those banks' bodies.
+
 ## Files
 
 | File | What |
@@ -228,6 +267,7 @@ firmware's self-reported version, separate from the certified protocol version
 | `csz1-control-board/sd3502_internal.bin` | **CSZ1 SD3502 internal flash dump (128 KiB)** |
 | `csz1-control-board/sd3502_nvr.bin` | CSZ1 SD3502 NVR dump (247 B, base addr `0x09`) |
 | `csz1-control-board/tools/sd3502_fsm_probe.py` | 500-series programming-FSM reader/dumper (pyftdi) |
+| `csz1-control-board/tools/ghidra_load_sd3502_banked.java` | Ghidra loader: bank overlays + L51 thunk resolution for `sd3502_internal.bin` |
 | `csz1-control-board/m25pe20.bin` | CSZ1 control-board flash dump (256 KiB) |
 | `csz1-control-board/nvm.hexpat` | ImHex pattern for the CSZ1 dump |
 | `csz1-control-board/captures/` | Logic-analyzer captures (see `PROTOCOL.md`) |
@@ -273,8 +313,12 @@ firmware's self-reported version, separate from the certified protocol version
       proprietary programming interface.~~ **Done** — readback was *not* locked;
       128 KB flash + NVR dumped over the SPI1 programming FSM (see *Reading the
       internal flash*); version string `"Z-Wave 4.33"` and serial `"5120199"`
-      recovered. Follow-up: disassemble `sd3502_internal.bin` (8051) — start with
-      the `0x1800` LJMP jump table the reset/interrupt vectors point into.
+      recovered.
+- [x] ~~Disassemble `sd3502_internal.bin` (8051).~~ **Done** — it's a Keil L51
+      *banked* image (32 KiB common + three 32 KiB banks paged via SFR `0xFF[5:4]`).
+      Loaded into Ghidra with bank overlays and all 97 banked-call thunks resolved;
+      see *Disassembling the firmware* and
+      [`tools/ghidra_load_sd3502_banked.java`](../csz1-control-board/tools/ghidra_load_sd3502_banked.java).
 
 ---
 
