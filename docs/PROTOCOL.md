@@ -29,24 +29,25 @@ the VCZ1 remote to the CSZ1 — is Z-Wave RF, not this bus.)
 
 ## Inter-board connector (5-pin)
 
-| Pin | Wire   | ZM5202 pin | Signal | Notes |
-|:---:|:-------|:----------:|:-------|:------|
-| 1   | —      | GND (1,6,12,16,17) | GND | Ground |
-| 2   | Brown  | 13 (GPIO) | **ENABLE / wake** | Master drives high to wake motor board; pulldown, idle low |
-| 3   | Red    | 10 (GPIO, alt UART0_RX) | **I²C SDA** | Bit-banged |
-| 4   | Orange | 15 (GPIO, alt UART0_TX) | **I²C SCL** | Bit-banged, master-driven; also carries the boot frame (below) |
-| 5   | —      | — (raw battery) | **VCC** | Raw battery passed straight through to motor board. Supply is **8× AA in series** — ≈12 V nominal (alkaline), **unregulated**, so it sags as the cells drain (not a constant 12 V) |
+| Pin | ZM5202 pin | Signal | Notes |
+|:---:|:----------:|:-------|:------|
+| 1   | GND (1,6,12,16,17) | GND | Ground |
+| 2   | 13 (GPIO) | **ENABLE / wake** | Master drives high to wake motor board; pulldown, idle low |
+| 3   | 10 (GPIO, alt UART0_RX) | **I²C SDA** | Bit-banged |
+| 4   | 15 (GPIO, alt UART0_TX) | **I²C SCL** | Bit-banged, master-driven; also carries the boot frame (below) |
+| 5   | — (raw battery) | **VCC** | Raw battery passed straight through to motor board. Supply is **8× AA in series** — ≈12 V nominal (alkaline), **unregulated**, so it sags as the cells drain (not a constant 12 V) |
 
-Each signal line: series resistor + shunt cap (RC filter) + 3-pin ESD clamp
-(steering diodes to VCC/GND), connected **directly** to the ZM5202 (no buffer,
-non-inverting).
+The cable's five conductors are all the same color (white); identify pins by
+position, not color. Each signal line: series resistor + shunt cap (RC filter) +
+3-pin ESD clamp (steering diodes to VCC/GND), connected **directly** to the ZM5202
+(no buffer, non-inverting).
 
 ---
 
 ## Boot frame (ignore for control)
 
 At every power-up, **before** I²C starts, the module emits a fixed async-serial
-frame on **orange / pin 15** (which is reconfigured to I²C SCL afterward):
+frame on **pin 15** (which is reconfigured to I²C SCL afterward):
 
 - **19200 baud, 8N1, idle-high, LSB-first**
 - Bytes: **`0x42 0x01 0xBD`**  (additive checksum: `0x42+0x01+0xBD = 0x100`)
@@ -64,8 +65,8 @@ SCL pin → idle → ENABLE high again → ~70 ms later I²C begins.
 
 - **Bus:** bit-banged I²C, ~15 kHz (SCL ≈ 17.5 µs low / 50 µs high, jittery).
   **Master-side (SD3502 firmware) confirms the bit-bang:** open-drain on 8051
-  **Port 3 — SDA = P3.4, SCL = P3.5** (so connector red/pin 3 = SDA = die P3.4,
-  orange/pin 4 = SCL = die P3.5). SCL release-high spins polling the `P3.5`
+  **Port 3 — SDA = P3.4, SCL = P3.5** (so connector pin 3 = SDA = die P3.4,
+  pin 4 = SCL = die P3.5). SCL release-high spins polling the `P3.5`
   readback until the slave lets it rise — i.e. the master **honours the slave's
   clock-stretching** (`i2c_scl_release_high_wait`). The jittery rate is a
   byproduct of the software loop, not a fixed divisor.
@@ -358,11 +359,11 @@ until 7A = 0x01C0 (target) / 0x01C2 (closed limit) / 0x01C4 (open limit)
 
 You can bypass the Z-Wave side entirely:
 
-1. Wire an I²C master (Pi/Arduino) to **SDA = red/pin 3**, **SCL = orange/pin 4**,
+1. Wire an I²C master (Pi/Arduino) to **SDA = pin 3**, **SCL = pin 4**,
    **GND = pin 1**. Power the motor board from **VCC = pin 5** (raw battery — the
    stock pack is **8× AA in series**, ≈12 V nominal and unregulated; supply
    anything in that range).
-2. Raise **ENABLE (brown / pin 2)** high, wait ~30 ms.
+2. Raise **ENABLE (pin 2)** high, wait ~30 ms.
 3. Talk SMBus to **0x0B** at ~15 kHz with **CRC-8 (poly 0x07) PEC**.
 4. Issue `0xD1`: `0xFFFFFFFF` (−1) = open, `0x00000001` (+1) = close, or a signed
    count delta for partial positioning. Poll `0x7A` until a stop code
@@ -373,7 +374,7 @@ You can bypass the Z-Wave side entirely:
 The recipe above taps the internal 5-pin cable (requires opening the blind). The
 control board's external **USB-micro jack** also exposes the **I²C SDA/SCL and
 power** — its data pins run through the board to the motor controller — but **not
-the ENABLE line (brown / pin 2)**. Without ENABLE the motor board never wakes, so
+the ENABLE line (pin 2)**. Without ENABLE the motor board never wakes, so
 it won't ACK or move: the external jack lets you reach the bus electrically but
 **not drive the motor**. (Possibly an intentional debug/passthrough; purpose
 unconfirmed.) To actually command the motor you still need ENABLE from the
