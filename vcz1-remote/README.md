@@ -10,8 +10,9 @@ Part of the [Springs Window Fashions Z-Wave blind project](../README.md).
 
 > Status: chip identity, pinout, dump procedure, and the manufacturer/serial
 > records are **confirmed** (cross-checked against the Z-Wave Alliance cert). The
-> finer NVM layout (identity block, the `field2` value, TLV record framing) is
-> partially inferred — see *Open items*.
+> NVM config block is decoded by analogy to the CSZ1 firmware (firmware-default
+> bytes + per-unit data, not a TLV); the only inference left is where the Home ID
+> begins inside the identity blob — see *Open items*.
 
 ## Overview
 
@@ -106,23 +107,24 @@ status register reads `0x00` (not floating `0xFF`).
 ### What's in the dump
 
 `cav25256.bin` (32 KiB) is almost entirely erased (`0xFF`/`0x00`); the real config
-sits in one small block at **`0x2980–0x29C8`**. It shares the **same record
-structure** as the CSZ1's config block, just relocated (see the ImHex pattern for
-exact offsets and field colors):
+sits in one small block at **`0x2980–0x29C8`**. It is the **same layout** as the
+CSZ1's config block, just relocated near the end of the chip. The VCZ1 firmware
+wasn't dumped, but the manufacturer blob and its neighbours are byte-for-byte the
+CSZ1 structure (only the product constants differ), so the same scheme applies
+(structure decoded from the [CSZ1 firmware](../csz1-control-board/README.md)):
 
-- **Protocol header / NVM descriptor** — region the ZW0500 nvm module manages;
-  layout not decoded. Scattered `0xFE` bytes are "unwritten" markers.
-- **Device identity** — ~8 bytes of per-unit random data; first 4 most likely the
-  **Z-Wave Home ID**, trailing bytes look like key/seed material (unconfirmed).
-- **Serial number** — null-terminated ASCII `"5126726A006"`.
-- **Manufacturer Specific record** (Command Class 0x72), big-endian:
-  `manufacturer_id` (`0x026E`), a 16-bit `field2` (`0x5741` "WA" — role unknown),
-  `product_type_id` (`0x5643`), `product_id` (`0x5A31`).
+- **Firmware defaults** — the manufacturer-specific blob at `0x29B6` is a
+  compile-time constant: `manufacturer_id` (`0x026E`), `field2` (`0x5741` "WA"),
+  `product_type_id` (`0x5643`), `product_id` (`0x5A31`). `field2` is a **fixed
+  per-product value**, not per-unit (meaning still unknown).
+- **Per-unit factory / inclusion data** — the null-terminated serial
+  `"5126726A006"` (`0x299C`, preceded by a `0x42` marker), and a `0x42`-bracketed
+  **identity blob** (`0x2989…0x2992`): 8 bytes whose middle 4 (`e7 2e 93 2e`) look
+  like the **Z-Wave Home ID**.
 
-The config block appears to use **`0x0B`-length-prefixed (TLV) records** — a
-`0x0B` (=11) byte followed by exactly 11 bytes, then the next `0x0B`. The
-manufacturer record lives inside one such record; the full TLV grammar isn't
-confirmed from the available dumps.
+> The earlier "`0x0B`-length-prefixed TLV records" guess is **wrong** — see the
+> [CSZ1 doc](../csz1-control-board/README.md): the block is firmware-initialized
+> defaults + per-unit data, not an in-NVM TLV.
 
 #### Using the ImHex pattern
 
@@ -143,16 +145,20 @@ Load `vcz1-remote/nvm.hexpat`. It `#include`s shared types from
 
 ## Open items
 
-- [ ] Identify `field2` (`0x5741` on VCZ1, `0x6783` on CSZ1) — fixed product
-      attribute or per-unit? A second dump of either model would settle it.
-- [ ] Confirm the device-identity block boundary (it doesn't align cleanly with
-      the CSZ1 layout) and whether bytes 0–3 are the Z-Wave Home ID.
-- [ ] Confirm the `0x0B`-prefixed TLV record framing across the whole config
-      block.
-- [ ] Determine whether network security keys live in the external EEPROM or only
-      in the SoC.
+- [x] ~~Identify `field2` — fixed product attribute or per-unit?~~ **Fixed
+      product attribute** — a compile-time firmware constant (resolved on the CSZ1,
+      same scheme here); `0x5741` for the VCZ1. Semantics still unknown.
+- [x] ~~Confirm the `0x0B`-prefixed TLV record framing.~~ **Disproven** — the block
+      is firmware-initialized defaults + per-unit data, not an in-NVM TLV (see the
+      [CSZ1 doc](../csz1-control-board/README.md)).
+- [x] ~~Determine whether network security keys live in the external EEPROM.~~
+      **Not present** — sliding-window scan finds no 16-byte key-shaped blob in any
+      dump; a key would live in SoC MTP (not dumped) or was never bootstrapped.
+- [ ] Confirm where the Home ID begins inside the `0x42`-bracketed identity blob
+      (typed as the middle 4 bytes). A second VCZ1 dump would settle it.
 - [ ] (Optional) Dump the ZM5101 SoC's internal flash via the 500-series
-      programming FSM, as was done on the CSZ1.
+      programming FSM, as was done on the CSZ1 — would confirm the VCZ1's own
+      firmware-default table and `field2`.
 
 ## References
 

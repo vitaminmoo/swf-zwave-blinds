@@ -13,8 +13,10 @@ Part of the [Springs Window Fashions Z-Wave blind project](../README.md).
 > Status: chip identities, pinout, both dump procedures, and the
 > manufacturer/serial records are **confirmed**. The SD3502 internal flash readback
 > turned out **not** to be lock-protected, so the application firmware was dumped
-> and loaded into Ghidra. The finer external-NVM layout (identity block, `field2`,
-> TLV framing) is partially inferred — see *Open items*.
+> and loaded into Ghidra, which also decoded the external-NVM config block (it's
+> firmware-initialized defaults + per-unit data, not a TLV — see below). The only
+> remaining inference is where the Home ID begins inside the identity blob — see
+> *Open items*.
 
 ## Overview
 
@@ -122,21 +124,27 @@ sha256sum dump1.bin dump2.bin
 #### What's in the external dump
 
 `m25pe20.bin` (256 KiB) is almost entirely erased (`0xFF`/`0x00`); real data sits
-in one small config block at **`0x1200–0x1266`**. It shares the same Z-Wave NVM
-record structure as the [VCZ1](../vcz1-remote/README.md) (just relocated). See the
-ImHex pattern for exact offsets and field colors:
+in one small config block at **`0x1200–0x1268`**. The structure is now decoded
+from the SD3502 firmware (below); it shares the same layout as the
+[VCZ1](../vcz1-remote/README.md), just relocated. Two kinds of data live here:
 
-- **Protocol header / NVM descriptor** — region the ZW0500 nvm module manages;
-  layout not decoded. Scattered `0xFE` bytes are "unwritten" markers.
-- **Device identity** — ~8 bytes of per-unit random data; first 4 most likely the
-  **Z-Wave Home ID**, trailing bytes look like key/seed material (unconfirmed).
-- **Serial number** — null-terminated ASCII `"5126732A003"`.
-- **Manufacturer Specific record** (Command Class 0x72), big-endian:
-  `manufacturer_id` (`0x026E`), a 16-bit `field2` (`0x6783` — role unknown),
-  `product_type_id` (`0x4353`), `product_id` (`0x5A31`).
+- **Firmware defaults** — written at boot by an init routine in the SD3502
+  firmware that walks an opcode table (`CODE ~0x2200–0x2360`). NVM records are
+  `E0 <len> 02 <addr:u16 BE> <bytes>`; the six CSZ1 records seed
+  `0x1210`, `0x124F`, `0x1254`, `0x1256`, `0x1262`, `0x1267`. Because the whole
+  **Manufacturer Specific blob is one of these defaults**, `manufacturer_id`
+  (`0x026E`), `field2` (`0x6783`), `product_type_id` (`0x4353`) and `product_id`
+  (`0x5A31`) are **compile-time constants** (the 8-byte blob is a literal at
+  `CODE:2303`). `field2` is a fixed per-product value — *not* per-unit — though
+  its meaning is still unknown.
+- **Per-unit factory / inclusion data** (*not* in the firmware table) — the
+  null-terminated serial `"5126732A003"` (`0x1230`), and a `0x42`-bracketed
+  **identity blob** (`0x1217…0x1221`): 9 bytes whose middle 4 (`fc f6 4a 97`) look
+  like the **Z-Wave Home ID**, assigned at network inclusion.
 
-The block appears to use **`0x0B`-length-prefixed (TLV) records** (a `0x0B` byte
-followed by 11 bytes, repeating). The full grammar isn't confirmed.
+> The earlier "`0x0B`-length-prefixed TLV records" guess is **wrong** — those
+> `0x0B` bytes are just values inside the firmware-default blobs, not a record
+> framing. The block's structure lives in firmware, not in the NVM itself.
 
 To browse it, load `nvm.hexpat` in ImHex with the repo's `shared/` folder on the
 pattern path (see the [top-level README](../README.md#imhex-patterns-nvm-dumps)).
@@ -269,14 +277,22 @@ each overlay.
 
 ## Open items
 
-- [ ] Identify `field2` (`0x6783` on CSZ1, `0x5741` on VCZ1) — fixed product
-      attribute or per-unit?
-- [ ] Confirm the device-identity block boundary and whether bytes 0–3 are the
-      Z-Wave Home ID.
-- [ ] Confirm the `0x0B`-prefixed TLV record framing across the external config
-      block.
-- [ ] Determine whether network security keys are in the external memory or only
-      in the SoC.
+- [x] ~~Identify `field2` (`0x6783` on CSZ1, `0x5741` on VCZ1) — fixed product
+      attribute or per-unit?~~ **Fixed product attribute** — it's a compile-time
+      firmware constant (literal at `CODE:2303`, part of the mfr-specific default
+      blob), so it does not vary per unit. Semantics still unknown.
+- [x] ~~Confirm the `0x0B`-prefixed TLV record framing.~~ **Disproven** — there is
+      no in-NVM TLV; the config block is firmware-initialized defaults (an
+      `E0`-opcode init table) plus per-unit factory/inclusion data. The stray
+      `0x0B` bytes are values inside default blobs.
+- [ ] Confirm where the Home ID begins inside the `0x42`-bracketed identity blob
+      (typed as the middle 4 bytes; the surrounding bytes' roles are unknown, and
+      the blob differs in length CSZ1=9 / VCZ1=8). A second dump would settle it.
+- [x] ~~Determine whether network security keys are in the external memory.~~
+      **Not present** — no `E0` NVM-default record carries key-sized data and a
+      sliding-window scan finds zero 16-byte AES-key-shaped blobs in the dumps; any
+      network key lives in SoC MTP (not FSM-readable / not dumped) or was never
+      bootstrapped.
 - [x] ~~Dump the SD3502 internal firmware ROM.~~ **Done** — readback was *not*
       locked; 128 KiB flash + NVR dumped over the SPI1 programming FSM. Version
       string `"Z-Wave 4.33"` and serial `"5120199"` recovered.

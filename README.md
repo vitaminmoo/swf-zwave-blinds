@@ -111,7 +111,8 @@ shared/
 
 ### ImHex patterns (NVM dumps)
 
-The CSZ1 and VCZ1 dumps share the same Z-Wave NVM record structure, so both
+The CSZ1 and VCZ1 dumps share the same Z-Wave NVM layout (firmware-default config
+bytes + per-unit factory/inclusion data, decoded from the SD3502 firmware), so both
 `nvm.hexpat` files `#include` from `shared/includes/`. ImHex resolves `#include`
 from an `includes/` subfolder on a configured pattern path — add this repo's
 **`shared/`** folder under **ImHex → Extras → Settings → Folders** (ImHex then
